@@ -148,7 +148,7 @@ canvas.drag{cursor:grabbing}
     <canvas id="map"></canvas>
     <div class="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zreset" aria-label="Reset view" style="font-size:14px">⟲</button></div>
     <div class="mlegend" id="mlegend"></div>
-    <div class="attr">Offline map: positions drawn from the data's own coordinates, no street tiles</div>
+    <div class="attr" id="attr"></div>
   </div>
 </section>
 </main>
@@ -310,10 +310,13 @@ function zipR(n){return 5+Math.sqrt(n/ZMAX)*20}
 function drawMap(){
   if(!mapW)return;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,mapW,mapH);
   const ix=idx();
-  // density backdrop
+  drawTiles(TILE_BASE);
+  $('attr').textContent=tilesOK>0?'Basemap: Esri, HERE, Garmin, © OpenStreetMap contributors':'Esri basemap needs an internet connection. Offline, points are drawn without street tiles.';
+  // density backdrop (offline fallback only)
   const cell=0.004*(WORLD()/360), px=Math.max(1.5,cell*1.05);
-  for(const d of D.dens){if(!ix.includes(d[3]))continue;const [x,y]=toScr(d[1],d[0]);if(x<-20||y<-20||x>mapW+20||y>mapH+20)continue;
+  for(const d of (tilesOK>0?[]:D.dens)){if(!ix.includes(d[3]))continue;const [x,y]=toScr(d[1],d[0]);if(x<-20||y<-20||x>mapW+20||y>mapH+20)continue;
     const a=Math.min(.55,.1+Math.log10(d[2]+1)*.14);ctx.fillStyle=`rgba(120,140,175,${mode==='zip'?a*.7:a})`;ctx.fillRect(x-px/2,y-px/2,px,px)}
+  if(tilesOK>0)drawTiles(TILE_REF);
   if(mode==='zip'){
     const arr=[...ZT].sort((a,b)=>a.n-b.n);
     for(const z of arr){const [x,y]=toScr(z.lat,z.lon);if(x<-40||y<-40||x>mapW+40||y>mapH+40)continue;
@@ -325,6 +328,21 @@ function drawMap(){
       ctx.beginPath();ctx.arc(x,y,4.2,0,7);ctx.fillStyle=BCOL[p[2]];ctx.fill();ctx.lineWidth=1;ctx.strokeStyle='rgba(10,12,17,.85)';ctx.stroke()}
   }
   if(popup)placePop();
+}
+
+/* ---------- Esri basemap tiles (ArcGIS Online, Canvas / World Dark Gray) ---------- */
+const TILE_BASE='https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/';
+const TILE_REF='https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/';
+const tcache={};let tilesOK=0,raf=0;
+function getTile(base,z,x,y){const k=base+z+'/'+y+'/'+x;let t=tcache[k];if(!t){t=new Image();t.onload=()=>{t.ok=true;tilesOK++;sched()};t.onerror=()=>{t.err=true};t.src=k;tcache[k]=t}return t}
+function sched(){if(!raf)raf=requestAnimationFrame(()=>{raf=0;drawMap()})}
+function drawTiles(base){
+  const tz=Math.max(0,Math.min(16,Math.round(VIEW.z))),n=1<<tz,sz=256*Math.pow(2,VIEW.z-tz),w=WORLD();
+  const left=VIEW.cx-mapW/2/w,right=VIEW.cx+mapW/2/w,top=VIEW.cy-mapH/2/w,bot=VIEW.cy+mapH/2/w;
+  const x0=Math.floor(left*n),x1=Math.floor(right*n),y0=Math.max(0,Math.floor(top*n)),y1=Math.min(n-1,Math.floor(bot*n));
+  for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){
+    const tile=getTile(base,tz,((x%n)+n)%n,y);
+    if(tile.ok)ctx.drawImage(tile,mapW/2+(x/n-VIEW.cx)*w,mapH/2+(y/n-VIEW.cy)*w,sz+.6,sz+.6)}
 }
 let HOMEZ=0;
 function resize(){const b=$('mapbox').getBoundingClientRect();if(!b.width)return;dpr=devicePixelRatio||1;mapW=b.width;mapH=b.height;mapC.width=mapW*dpr;mapC.height=mapH*dpr;if(!VIEW.z){resetView();HOMEZ=VIEW.z}drawMap()}
